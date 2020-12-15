@@ -24,6 +24,19 @@ conv = kakasi.getConverter()
 
 #################################################
 
+class Song:
+    def __init__(self, song, artist, bpm, key, links):
+        self.song = song
+        self.artist = artist
+        self.bpm = bpm
+        self.key = key
+        self.links = {}
+
+    def set_links(self, links_dict):
+        self.links = links_dict
+
+#################################################
+
 def get_table(SOURCE):
     """
     Scrapes the main table from the ct2viewer website. 
@@ -56,15 +69,11 @@ def get_initial_df(SOURCE):
     charts_df = pd.concat(charts_df)
     charts_df.rename(columns = {"Lv.":"Diff_E","Lv..1":"Diff_H",
         "Lv..2":"Diff_C","Lv..3":"Diff_G"
-        ,"Chart":"Chart_E","Chart.1":"Chart_H"
-        ,"Chart.2":"Chart_C","Chart.3":"Chart_G"}, inplace = True)
+        ,"Chart Page":"Chart_E","Chart Page.1":"Chart_H"
+        ,"Chart Page.2":"Chart_C","Chart Page.3":"Chart_G"
+        ,"Chart Page.4":"Chart_CR"}, inplace = True)
 
-    #charts_df.drop('Unnamed: 12', axis = 1, inplace = True)
-
-    # for debug purposes
-    characters = set(charts_df.Character)
-    for index, song in charts_df.iterrows():        
-        print(f'Character: {"".join(song.Character)}, Song: {"".join(song.Song)}')
+    charts_df = charts_df[charts_df['Song'].notna()]
 
     return charts_df
 
@@ -82,7 +91,8 @@ def get_links_by_difficulty(table):
     links = [link.get('href') for link in table.find_all('a')]
     linksFormatted = [f"{link}.html" for link in links]
 
-    return {diff: [link for link in linksFormatted if diff in link] 
+    return {
+            diff: [link for link in linksFormatted if diff in link] 
                     for diff in utils.REGEXES_BY_DIFF.keys()
             }
     
@@ -146,6 +156,9 @@ def merge_data(charts_df, merged_dict):
                             'Key' : list(merged_dict['chaos.html'].keys()), 
                             })
 
+    links_df.to_csv("links.csv")
+    charts_df.to_csv("charts.csv")
+
     return pd.merge(
             left = charts_df, right = links_df, 
             left_on = ['Song', 'Artist'], 
@@ -160,7 +173,6 @@ def get_romanized_titles(merged_df):
     :param merged_df: Merged DataFrame containing all relevant song info
     :return: Same DataFrame but now with romanized titles
     """
-
     for song in merged_df.Song:
         # if title is in japanese
         if utils.JP_REGEX.findall(song):
@@ -192,7 +204,6 @@ def handle_duplicates(merged_df):
             # get index of each song with the same title
             indexes = merged_df.index[merged_df.Song == dupe.Song].tolist()
 
-        # I took the indexes here instead of modifying the song directly because
         # pandas doesn't allow assignment during iteration
         for index in indexes:
             # append the artist's name in brackets
@@ -256,13 +267,11 @@ def search_song(df, query):
     :param query: A query in string format, usually the name of a song
     :return: DataFrame object containing all information about the song
     """
-
-    # check if input is Japanese
-    is_japanese = re.search(utils.JP_REGEX, query) is not None
-
-    # Keep track of "best" matches and ratios
     best_fuzz_ratio = 0
     best_matches = []
+
+    # check if input is japanese
+    is_japanese = re.search(JP_REGEX, query)
     
     for index, row in df.iterrows():
         # if there is an exact match simply return it
@@ -274,29 +283,10 @@ def search_song(df, query):
 
         if compare_fuzz(row, best_matches, best_fuzz_ratio, fuzz_value):
             best_fuzz_ratio = fuzz_value
-
-        if not is_japanese:
-            # have to compare to 2 more attributes:
-
-            # 1) Key. 
-            # Guards against three edge cases:
-            # Works better if user input is the translated title of the song
-            # (e.g. the key for the song 魔法みたいなミュージック！ is music_like_magic)
-            # or if song contains special characters
-            # (e.g. key for Re:VeLΔTiØN ～光道ト破壊ノ双白翼～ is revelation)
-            # or song title is actually in Chinese, including dialects
-            # (e.g. key for 一啖兩啖 is yaat_daam_loeng_daam)
-
-            # 2) Key_J if user input is romanized Japanese.
-            # Guards against edge case if the song title is actually in 
-            # Chinese but user inputs romanized Japanese instead:
-            # (e.g. user inputs ichi tan ryou tan instead of yaat daam loeng daam for 一啖兩啖)
             
-            fuzz_value_key = fuzz.token_set_ratio(row.Key, query)
+        if not is_japanese:
+            # also check if input is romanized Japanese
             fuzz_value_romanized = fuzz.token_set_ratio(row.Key_J, query)
-
-            if compare_fuzz(row, best_matches, best_fuzz_ratio, fuzz_value_key):
-                best_fuzz_ratio = fuzz_value_key
             
             if compare_fuzz(row, best_matches, best_fuzz_ratio, fuzz_value_romanized):
                 best_fuzz_ratio = fuzz_value_romanized
@@ -308,8 +298,8 @@ def search_song(df, query):
     # removes duplicates from search
     songs = set([song.Song for song in best_matches])
     output = [df.loc[df.Song == song] for song in songs]
-    print(output)
-    return pd.concat(output)
+
+    return output
 
 
 def search_difficulty(df, query):
@@ -368,8 +358,6 @@ def embed_song(merged_dict, song):
     # grab the thumbnail from the CHAOS link
     artwork = get_images(links[2])
 
-    print(links)
-
     embed = discord.Embed(title = f'{"".join(song.Song)}', color = 0x1abc9c)
     embed.set_thumbnail(url = artwork)
 
@@ -417,19 +405,25 @@ def process_search(merged_dict, search_result):
     :param search_result: Result of the function search_song
     :return: Appropriate discord.Embed object
     """
-
-    if len(search_result) == 0:
+    print("search result")
+    print(search_result)
+    print(type(search_result))
+    result = search_result.to_frame()
+    print("post conversion")
+    print(result)
+    print(type(result))
+    if len(result) == 0:
         return utils.generate_embed(
                     status = 'Error', 
                     msg =  """No songs found. There could be an error with
                                         your search or the bot."""
                 )
 
-    elif len(search_result) == 1:
-        return embed_song(merged_dict, search_result)
+    elif len(result) == 1:
+        return embed_song(merged_dict, result)
         
-    elif len(search_result) > 1:
-        results = [row.Song for index, row in search_result.iterrows()]
+    elif len(result) > 1:
+        results = [row.Song for index, row in result.iterrows()]
         
         return utils.generate_embed(
                     status = 'Error',

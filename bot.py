@@ -55,7 +55,9 @@ charts_df = c2v.get_initial_df(utils.SOURCE)
 merged_dict = c2v.merge_keys_and_links(table)
 
 merged_df = c2v.get_merged_df(charts_df, merged_dict)
-print(merged_df)
+merged_df.to_csv("test.csv")
+
+#################################################
 
 @client.command()
 async def c2s(message, *, arg):
@@ -75,10 +77,11 @@ async def c2s(message, *, arg):
             ))
         return
 
-    check_for_emote_or_ping(channel)
-
     result = c2v.search_song(merged_df, arg)
     embed = c2v.process_search(merged_dict, result)
+
+    print(embed)
+    print(type(embed))
 
     await channel.send(embed = embed)
 
